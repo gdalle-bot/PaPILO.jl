@@ -174,6 +174,7 @@ const lp_matrix = Dict(
     "C4" => Dict("X2" => 1.0, "X3" => 2.0),
 )
 const lp_rhs = Dict("C1" => 6.0, "C2" => 8.0, "C3" => 20.0, "C4" => 4.0)
+const lp_upper = Dict("X1" => 10.0, "X2" => 10.0, "X3" => 10.0, "X4" => 3.0)
 const lp_sense = Dict("C1" => :geq, "C2" => :geq, "C3" => :leq, "C4" => :eq)
 
 """
@@ -216,32 +217,28 @@ end
     @test isfile(postsolve_file)
 
     # solve the reduced problem with the LP solver bundled in the PaPILO executable,
-    # which also produces the dual solution, reduced costs and basis of the reduced space
+    # which also produces the dual solution and the reduced costs of the reduced space
     reduced_sol = tempname() * ".sol"
     reduced_dual = tempname() * ".dual"
-    reduced_costs_file = tempname() * ".rcost"
-    reduced_basis = tempname() * ".bas"
+    reduced_costs = tempname() * ".rcost"
     SCIP_PaPILO_jll.papilo() do exe
-        run(`$exe solve -f $presolved_instance -l $reduced_sol --dualsolution $reduced_dual -c $reduced_costs_file -w $reduced_basis`)
+        run(`$exe solve -f $presolved_instance -l $reduced_sol --dualsolution $reduced_dual -c $reduced_costs`)
     end
     @test isfile(reduced_sol)
     @test isfile(reduced_dual)
+    @test isfile(reduced_costs)
 
     original_sol = tempname() * ".sol"
     original_dual = tempname() * ".dual"
     original_costs = tempname() * ".rcost"
-    original_basis = tempname() * ".bas"
-    # `basis_reduced_sol` is deliberately not exercised here: reading a reduced-space
-    # basis crashes the PaPILO 3.0.1 executable (std::bad_alloc), including on basis
-    # files that PaPILO itself wrote. See the note in `postsolve_from_file`.
     PaPILO.postsolve_from_file(
         postsolve_file,
         reduced_sol,
         original_sol;
-        dual_reduced_sol=reduced_dual,
-        costs_reduced_sol=reduced_costs_file,
-        dual_sol=original_dual,
-        reduced_costs=original_costs,
+        reduced_dual_sol=reduced_dual,
+        reduced_costs_sol=reduced_costs,
+        original_dual_sol=original_dual,
+        original_costs_sol=original_costs,
     )
     @test isfile(original_sol)
     @test isfile(original_dual)
@@ -251,10 +248,15 @@ end
     _, y = parse_papilo_solution(original_dual, lp_rows)
     _, d = parse_papilo_solution(original_costs, lp_columns)
 
-    # the recovered solutions live in the original problem space
+    # the recovered solutions live in the original problem space, which is strictly
+    # larger than the reduced one here
     @test length(x) == length(lp_columns)
     @test length(y) == length(lp_rows)
     @test length(d) == length(lp_columns)
+    # the reduced problem really is smaller, so postsolve actually had work to do
+    header = readlines(presolved_instance)
+    reduced_ncols = parse(Int, split(only(filter(l -> startswith(l, "*COLUMNS:"), header)))[2])
+    @test reduced_ncols < length(lp_columns)
 
     tol = 1e-6
 
@@ -271,6 +273,7 @@ end
     end
     for col in lp_columns
         @test x[col] >= -tol
+        @test x[col] <= lp_upper[col] + tol
     end
 
     # dual feasibility: sign conditions for a minimization problem
@@ -295,9 +298,17 @@ end
     # variable to sit at one of its bounds
     for col in lp_columns
         if abs(d[col]) > tol
-            @test isapprox(x[col], 0.0, atol=tol) || isapprox(x[col], 10.0, atol=tol) || isapprox(x[col], 3.0, atol=tol)
+            @test isapprox(x[col], 0.0, atol=tol) || isapprox(x[col], lp_upper[col], atol=tol)
         end
     end
+
+    # strong duality, in the form implied by stationarity and complementary slackness:
+    # c'x == b'y + d'x
+    @test isapprox(
+        sum(lp_objective[col] * x[col] for col in lp_columns),
+        sum(lp_rhs[row] * y[row] for row in lp_rows) + sum(d[col] * x[col] for col in lp_columns),
+        atol=tol,
+    )
 
     # the reported objective matches the primal solution
     @test isapprox(primal_obj, sum(lp_objective[col] * x[col] for col in lp_columns), atol=tol)
@@ -305,30 +316,23 @@ end
     @testset "argument validation" begin
         # duals and reduced costs must be requested together
         @test_throws ArgumentError PaPILO.postsolve_from_file(
-            postsolve_file, reduced_sol, original_sol; dual_reduced_sol=reduced_dual,
+            postsolve_file, reduced_sol, original_sol; reduced_dual_sol=reduced_dual,
         )
         @test_throws ArgumentError PaPILO.postsolve_from_file(
-            postsolve_file, reduced_sol, original_sol; costs_reduced_sol=reduced_costs_file,
+            postsolve_file, reduced_sol, original_sol; reduced_costs_sol=reduced_costs,
         )
         # an output without the matching reduced-space input
         @test_throws ArgumentError PaPILO.postsolve_from_file(
-            postsolve_file, reduced_sol, original_sol; dual_sol=original_dual,
+            postsolve_file, reduced_sol, original_sol; original_dual_sol=original_dual,
         )
         @test_throws ArgumentError PaPILO.postsolve_from_file(
-            postsolve_file, reduced_sol, original_sol; reduced_costs=original_costs,
-        )
-        @test_throws ArgumentError PaPILO.postsolve_from_file(
-            postsolve_file, reduced_sol, original_sol; basis=original_basis,
-        )
-        # a basis cannot be recovered without the dual solution
-        @test_throws ArgumentError PaPILO.postsolve_from_file(
-            postsolve_file, reduced_sol, original_sol; basis_reduced_sol=reduced_basis,
+            postsolve_file, reduced_sol, original_sol; original_costs_sol=original_costs,
         )
     end
 
     # A postsolve archive written with `dual_postsolve=true` stores dual information and
     # PaPILO requires it to be postsolved with the dual solution and the reduced costs;
-    # passing only a primal solution crashes the executable. The default archive is
+    # passing only a primal solution to it crashes the executable. The default archive is
     # unaffected, which is what the round trip below checks.
     @testset "primal postsolve is unchanged" begin
         primal_presolved = tempname() * ".mps"
@@ -351,5 +355,36 @@ end
         for col in lp_columns
             @test isapprox(x2[col], x[col], atol=tol)
         end
+
+        # asking a primal-only archive for duals must not silently succeed: PaPILO exits
+        # normally but writes no dual file
+        missing_dual = tempname() * ".dual"
+        missing_costs = tempname() * ".rcost"
+        @test_throws ErrorException PaPILO.postsolve_from_file(
+            primal_postsolve_file,
+            primal_reduced_sol,
+            primal_only;
+            reduced_dual_sol=reduced_dual,
+            reduced_costs_sol=reduced_costs,
+            original_dual_sol=missing_dual,
+            original_costs_sol=missing_costs,
+        )
+        @test !isfile(missing_dual)
+        @test !isfile(missing_costs)
+
+        # a stale file left over from an earlier run must not mask that failure
+        stale_dual = tempname() * ".dual"
+        stale_costs = tempname() * ".rcost"
+        write(stale_dual, "=obj=  0\n")
+        write(stale_costs, "=obj=  0\n")
+        @test_throws ErrorException PaPILO.postsolve_from_file(
+            primal_postsolve_file,
+            primal_reduced_sol,
+            primal_only;
+            reduced_dual_sol=reduced_dual,
+            reduced_costs_sol=reduced_costs,
+            original_dual_sol=stale_dual,
+            original_costs_sol=stale_costs,
+        )
     end
 end

@@ -34,10 +34,9 @@ PaPILO.postsolve_from_file(
 
 ## Dual postsolve
 
-Dual solutions, reduced costs and basis information can also be brought back to the
-original problem space. This requires presolving in a dual-aware mode, which restricts
-PaPILO to the presolvers that support dual postsolve, and is only available for problems
-without integer variables.
+Dual solutions and reduced costs can also be brought back to the original problem space.
+This requires presolving in a dual-aware mode, which restricts PaPILO to the presolvers
+that support dual postsolve, and is only available for problems without integer variables.
 
 ```julia
 using PaPILO
@@ -61,17 +60,14 @@ PaPILO.postsolve_from_file(
     postsolve_file,
     reduced_sol,
     original_sol;
-    dual_reduced_sol = reduced_dual, # dual solution of the reduced problem
-    costs_reduced_sol = reduced_costs, # reduced costs of the reduced problem
-    dual_sol = original_dual, # where to write the original dual solution
-    reduced_costs = original_costs, # where to write the original reduced costs
+    reduced_dual_sol = reduced_dual, # dual solution of the reduced problem
+    reduced_costs_sol = reduced_costs, # reduced costs of the reduced problem
+    original_dual_sol = original_dual, # where to write the original dual solution
+    original_costs_sol = original_costs, # where to write the original reduced costs
 )
 ```
 
-PaPILO recovers duals and reduced costs together, so `dual_reduced_sol` and
-`costs_reduced_sol` must both be given. A basis can additionally be passed with
-`basis_reduced_sol` and written with `basis`, but this is currently broken in the PaPILO
-executable shipped by `SCIP_PaPILO_jll` (see the docstring of `postsolve_from_file`).
-
-Note that an archive written with `dual_postsolve = true` must be postsolved with the dual
-solution and the reduced costs; the default archive is primal-only and unchanged.
+PaPILO recovers duals and reduced costs together, so `reduced_dual_sol` and
+`reduced_costs_sol` must both be given. Conversely, an archive written with
+`dual_postsolve = true` must be postsolved with them; the default archive is primal-only
+and unchanged.
