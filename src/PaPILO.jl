@@ -133,7 +133,7 @@ Arguments:
 - `reduced_sol`: solution file to the reduced problem (produced by an external solver)
 - `original_sol`: file name where to write the solution to the original problem 
 
-Keyword arguments, named exactly after the PaPILO command line flags they map to. The two
+Keyword arguments, named identically to the corresponding command line flags. The two
 `*_reduced_solution` files describe the reduced problem and are read, the other two
 describe the original problem and are written:
 - `dual_reduced_solution` (`--dual-reduced-solution`): dual solution of the reduced problem
