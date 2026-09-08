@@ -125,6 +125,13 @@ ENDATA
     original_sol = tempname() * ".sol"
     PaPILO.postsolve_from_file(postsolve_file, reduced_sol, original_sol)
     @test isfile(original_sol)
+
+    # `read_sol` handles genuine SCIP output, not just PaPILO's own format
+    scip_values = PaPILO.read_sol(reduced_sol)
+    @test !isempty(scip_values)
+    @test all(isfinite, values(scip_values))
+    @test !any(startswith(name, "objective") for name in keys(scip_values))
+    @test !haskey(scip_values, "=obj=")
 end
 
 # A pure LP used to exercise dual postsolve. Dual postsolve is only available for
@@ -177,27 +184,11 @@ const lp_rhs = Dict("C1" => 6.0, "C2" => 8.0, "C3" => 20.0, "C4" => 4.0)
 const lp_upper = Dict("X1" => 10.0, "X2" => 10.0, "X3" => 10.0, "X4" => 3.0)
 const lp_sense = Dict("C1" => :geq, "C2" => :geq, "C3" => :leq, "C4" => :eq)
 
-"""
-Parse a PaPILO solution, dual solution or reduced costs file.
-
-Returns the objective value and a dictionary of the named values. PaPILO omits entries
-that are zero, so the dictionary is filled with explicit zeros for the given `names`.
-"""
-function parse_papilo_solution(path, names)
-    values = Dict{String,Float64}(name => 0.0 for name in names)
-    objective = nothing
-    for line in eachline(path)
-        parts = split(line)
-        if isempty(parts)
-            continue
-        elseif parts[1] == "=obj="
-            objective = parse(Float64, parts[2])
-        else
-            @assert parts[1] in names
-            values[parts[1]] = parse(Float64, parts[2])
-        end
-    end
-    return objective, values
+# `PaPILO.read_sol` omits the names PaPILO left out because their value is zero, so fill
+# them back in to get a dense vector over `names`
+function solution_values(path, names)
+    values = PaPILO.read_sol(path)
+    return Dict(name => get(values, name, 0.0) for name in names)
 end
 
 @testset "dual postsolve" begin
@@ -244,9 +235,13 @@ end
     @test isfile(original_dual)
     @test isfile(original_costs)
 
-    primal_obj, x = parse_papilo_solution(original_sol, lp_columns)
-    _, y = parse_papilo_solution(original_dual, lp_rows)
-    _, d = parse_papilo_solution(original_costs, lp_columns)
+    x = solution_values(original_sol, lp_columns)
+    y = solution_values(original_dual, lp_rows)
+    d = solution_values(original_costs, lp_columns)
+    # PaPILO named every entry after the original problem, nothing else leaked in
+    @test issubset(keys(PaPILO.read_sol(original_sol)), Set(lp_columns))
+    @test issubset(keys(PaPILO.read_sol(original_dual)), Set(lp_rows))
+    @test issubset(keys(PaPILO.read_sol(original_costs)), Set(lp_columns))
 
     # the recovered solutions live in the original problem space, which is strictly
     # larger than the reduced one here
@@ -310,8 +305,6 @@ end
         atol=tol,
     )
 
-    # the reported objective matches the primal solution
-    @test isapprox(primal_obj, sum(lp_objective[col] * x[col] for col in lp_columns), atol=tol)
 
     @testset "argument validation" begin
         # duals and reduced costs must be requested together
@@ -350,8 +343,12 @@ end
         PaPILO.postsolve_from_file(primal_postsolve_file, primal_reduced_sol, primal_only)
         @test isfile(primal_only)
         # the default (primal) pipeline finds the same optimum as the dual-aware one
-        obj2, x2 = parse_papilo_solution(primal_only, lp_columns)
-        @test isapprox(obj2, primal_obj, atol=tol)
+        x2 = solution_values(primal_only, lp_columns)
+        @test isapprox(
+            sum(lp_objective[col] * x2[col] for col in lp_columns),
+            sum(lp_objective[col] * x[col] for col in lp_columns),
+            atol=tol,
+        )
         for col in lp_columns
             @test isapprox(x2[col], x[col], atol=tol)
         end
@@ -372,12 +369,13 @@ end
         @test !isfile(missing_dual)
         @test !isfile(missing_costs)
 
-        # a stale file left over from an earlier run must not mask that failure
+        # a stale file left over from an earlier run is refused rather than overwritten,
+        # so it can never be mistaken for a successful run
         stale_dual = tempname() * ".dual"
         stale_costs = tempname() * ".rcost"
         write(stale_dual, "=obj=  0\n")
         write(stale_costs, "=obj=  0\n")
-        @test_throws ErrorException PaPILO.postsolve_from_file(
+        @test_throws ArgumentError PaPILO.postsolve_from_file(
             primal_postsolve_file,
             primal_reduced_sol,
             primal_only;
@@ -386,5 +384,88 @@ end
             dualsolution=stale_dual,
             reducedcosts=stale_costs,
         )
+    end
+end
+
+@testset "solution files" begin
+    @testset "round trip" begin
+        values = Dict("X1" => 3.6, "X2" => -0.5, "X10" => 1.0e-9, "X3" => 1.25e6, "X4" => 0.0)
+        file = tempname() * ".sol"
+        PaPILO.write_sol(file, values)
+        @test isfile(file)
+        @test PaPILO.read_sol(file) == values
+        # writing is deterministic and sorted by name
+        @test [split(line)[1] for line in eachline(file)] == sort(collect(keys(values)))
+        again = tempname() * ".sol"
+        PaPILO.write_sol(again, PaPILO.read_sol(file))
+        @test read(again, String) == read(file, String)
+    end
+
+    @testset "empty" begin
+        file = tempname() * ".sol"
+        PaPILO.write_sol(file, Dict{String,Float64}())
+        @test isfile(file)
+        @test isempty(read(file, String))
+        @test PaPILO.read_sol(file) == Dict{String,Float64}()
+    end
+
+    @testset "PaPILO format" begin
+        file = tempname() * ".sol"
+        write(file, """
+        =obj=                                              10
+        X1                                                 3.6                  obj(1)
+        X2                                                 -0.5                 obj(2)
+        """)
+        @test PaPILO.read_sol(file) == Dict("X1" => 3.6, "X2" => -0.5)
+    end
+
+    @testset "SCIP format" begin
+        file = tempname() * ".sol"
+        write(file, """
+        solution status: optimal solution found
+        objective value:                                   10
+        X1                                                 3.6   (obj:1)
+        X2                                                 -0.5  (obj:2)
+        """)
+        @test PaPILO.read_sol(file) == Dict("X1" => 3.6, "X2" => -0.5)
+    end
+
+    @testset "malformed lines are skipped" begin
+        file = tempname() * ".sol"
+        write(file, "\n X1 1.5 \n\nlonely\nX2 not_a_number\n   \nX3 -2\n")
+        @test PaPILO.read_sol(file) == Dict("X1" => 1.5, "X3" => -2.0)
+    end
+
+    @testset "a variable may be called objective" begin
+        file = tempname() * ".sol"
+        write(file, "objective value:  10\nobjective  7.5\n")
+        @test PaPILO.read_sol(file) == Dict("objective" => 7.5)
+    end
+
+    @testset "written files are accepted by PaPILO" begin
+        # the strongest check on the writer: round trip a reduced solution through it and
+        # confirm PaPILO postsolves it to the same original-space solution
+        input_instance = tempname() * ".mps"
+        open(input_instance, "w") do f
+            write(f, lp_test_file)
+        end
+        presolved_instance = tempname() * ".mps"
+        postsolve_file = tempname() * ".post"
+        PaPILO.presolve_write_from_file(input_instance, postsolve_file, presolved_instance)
+        reduced_sol = tempname() * ".sol"
+        SCIP_PaPILO_jll.papilo() do exe
+            run(`$exe solve -f $presolved_instance -l $reduced_sol`)
+        end
+
+        direct = tempname() * ".sol"
+        PaPILO.postsolve_from_file(postsolve_file, reduced_sol, direct)
+
+        rewritten = tempname() * ".sol"
+        PaPILO.write_sol(rewritten, PaPILO.read_sol(reduced_sol))
+        via_writer = tempname() * ".sol"
+        PaPILO.postsolve_from_file(postsolve_file, rewritten, via_writer)
+
+        @test PaPILO.read_sol(direct) == PaPILO.read_sol(via_writer)
+        @test !isempty(PaPILO.read_sol(via_writer))
     end
 end

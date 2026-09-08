@@ -52,6 +52,7 @@ PaPILO.presolve_write_from_file(
 
 # 2) solve the presolved problem with an external LP solver, writing the primal
 #    solution, the dual solution and the reduced costs of the reduced problem
+#    (see "Solution files" below to write them from Julia)
 
 # 3) postsolve: recover the original-space primal solution, dual solution and
 #    reduced costs
@@ -73,3 +74,28 @@ The keyword arguments are named after the PaPILO command line flags they map to
 `dual_reduced_solution` and `costs_reduced_solution` must both be given. Conversely, an archive written with
 `dual_postsolve = true` must be postsolved with them; the default archive is primal-only
 and unchanged.
+
+## Solution files
+
+The solution files exchanged with PaPILO can be read and written from Julia. `read_sol`
+returns a `Dict` mapping each name to its value, and `write_sol` writes such a mapping back
+in the format PaPILO expects:
+
+```julia
+using PaPILO
+
+# read a solution written by PaPILO, or by a solver such as SCIP
+solution = PaPILO.read_sol(original_sol)
+solution["X1"]
+
+# read the dual solution and the reduced costs, keyed by constraint and variable name
+duals = PaPILO.read_sol(original_dual)
+costs = PaPILO.read_sol(original_costs)
+
+# write the solution of the reduced problem, to hand it back to `postsolve_from_file`
+PaPILO.write_sol(reduced_sol, Dict("X1" => 3.6, "X2" => 0.8))
+```
+
+PaPILO omits entries whose value is zero, so a name absent from the returned dictionary
+stands for a zero. `read_sol` skips header lines, so it accepts both the files PaPILO
+writes and the ones SCIP writes.

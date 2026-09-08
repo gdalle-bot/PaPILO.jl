@@ -30,6 +30,69 @@ presolve.detectlindep = 0
 """
 
 """
+    read_sol(solution_file)
+
+Read a solution file and return a `Dict` mapping each name to its value.
+
+This reads the files written by [`postsolve_from_file`](@ref), for which the names are the
+variables of the original problem for a primal solution or the reduced costs, and its
+constraints for a dual solution. Values that are zero are omitted by PaPILO, so a name
+absent from the returned dictionary stands for a zero.
+
+Header lines are skipped, which makes the function accept both the format written by
+PaPILO
+
+```
+=obj=                                              10
+X1                                                 3.6                  obj(1)
+```
+
+and the one written by SCIP, whose solution files PaPILO also reads
+
+```
+objective value:                                   10
+X1                                                 3.6   (obj:1)
+```
+
+See [`write_sol`](@ref) for the inverse operation.
+"""
+function read_sol(solution_file)
+    values = Dict{String,Float64}()
+    for line in eachline(solution_file)
+        tokens = split(line)
+        # a line needs a name and a value, and `=obj=` is a header, not an entry
+        if length(tokens) < 2 || tokens[1] == "=obj="
+            continue
+        end
+        value = tryparse(Float64, tokens[2])
+        # skips headers such as `objective value:` or `solution status:`
+        if value !== nothing
+            values[tokens[1]] = value
+        end
+    end
+    return values
+end
+
+"""
+    write_sol(solution_file, values)
+
+Write `values`, a mapping from names to numbers such as the one returned by
+[`read_sol`](@ref), to `solution_file` in the format PaPILO reads, one `name value` pair
+per line sorted by name.
+
+This is the format the `reduced_sol` argument of [`postsolve_from_file`](@ref) expects, and
+the one SCIP writes, except that no objective value header is written since it cannot be
+computed from `values` alone. PaPILO ignores that header when reading.
+"""
+function write_sol(solution_file, values)
+    open(solution_file, "w") do file
+        for name in sort!(collect(keys(values)))
+            println(file, rpad(name, 50), " ", values[name])
+        end
+    end
+end
+
+"""
     presolve_write_from_file(problem_input::String, problem_postsolve::String, reduced_problem::String; dual_postsolve::Bool=false)
 
 Given the file `problem_input` containing the original problem, presolve it,
@@ -115,8 +178,10 @@ function postsolve_from_file(problem_postsolve, reduced_sol, original_sol; dual_
     end
     for (flag, file) in (("--dualsolution", dualsolution), ("--reducedcosts", reducedcosts))
         if file !== nothing
-            # so that the check below cannot be fooled by a leftover file
-            rm(file, force=true)
+            # otherwise a leftover file would be mistaken for a successful run below
+            if isfile(file)
+                throw(ArgumentError("$file already exists, remove it before asking PaPILO to write it"))
+            end
             push!(args, flag, string(file))
         end
     end
