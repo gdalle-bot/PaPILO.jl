@@ -60,19 +60,20 @@ function presolve_write_from_file(problem_input::String, problem_postsolve::Stri
 end
 
 """
-    postsolve_from_file(problem_postsolve, reduced_sol, original_sol; reduced_dual_sol=nothing, reduced_costs_sol=nothing, original_dual_sol=nothing, original_costs_sol=nothing)
+    postsolve_from_file(problem_postsolve, reduced_sol, original_sol; dual_reduced_solution=nothing, costs_reduced_solution=nothing, dualsolution=nothing, reducedcosts=nothing)
 
 Arguments:
 - `problem_postsolve`: postsolve file produced by the presolve command
 - `reduced_sol`: solution file to the reduced problem (produced by an external solver)
 - `original_sol`: file name where to write the solution to the original problem 
 
-Keyword arguments, mirroring the positional ones: `reduced_*` files describe the reduced
-problem and are read, `original_*` files describe the original problem and are written.
-- `reduced_dual_sol`: dual solution of the reduced problem
-- `reduced_costs_sol`: reduced costs of the reduced problem
-- `original_dual_sol`: file name where to write the dual solution to the original problem
-- `original_costs_sol`: file name where to write the reduced costs of the original problem
+Keyword arguments, named exactly after the PaPILO command line flags they map to. The two
+`*_reduced_solution` files describe the reduced problem and are read, the other two
+describe the original problem and are written:
+- `dual_reduced_solution` (`--dual-reduced-solution`): dual solution of the reduced problem
+- `costs_reduced_solution` (`--costs-reduced-solution`): reduced costs of the reduced problem
+- `dualsolution` (`--dualsolution`): file name where to write the dual solution to the original problem
+- `reducedcosts` (`--reducedcosts`): file name where to write the reduced costs of the original problem
 
 All four use the same format as `reduced_sol` and `original_sol`: a line `=obj=` followed
 by the objective value, then one line per entry with a name, its value and the objective
@@ -87,32 +88,32 @@ C4                                                 1.5                  obj(4)
 Entries are named after the constraints for a dual solution and after the variables for
 reduced costs, and entries equal to zero are omitted.
 
-PaPILO recovers duals and reduced costs together, so `reduced_dual_sol` and
-`reduced_costs_sol` must either both be given or both be omitted, and recovering either
+PaPILO recovers duals and reduced costs together, so `dual_reduced_solution` and
+`costs_reduced_solution` must either both be given or both be omitted, and recovering either
 requires `problem_postsolve` to have been written by [`presolve_write_from_file`](@ref)
 with `dual_postsolve=true`. Such an archive in turn *must* be postsolved with the duals:
 passing only a primal solution to it aborts PaPILO.
 """
-function postsolve_from_file(problem_postsolve, reduced_sol, original_sol; reduced_dual_sol=nothing, reduced_costs_sol=nothing, original_dual_sol=nothing, original_costs_sol=nothing)
+function postsolve_from_file(problem_postsolve, reduced_sol, original_sol; dual_reduced_solution=nothing, costs_reduced_solution=nothing, dualsolution=nothing, reducedcosts=nothing)
     @assert isfile(problem_postsolve)
     @assert isfile(reduced_sol)
-    if (reduced_dual_sol === nothing) != (reduced_costs_sol === nothing)
-        throw(ArgumentError("PaPILO recovers the dual solution and the reduced costs together, `reduced_dual_sol` and `reduced_costs_sol` must either both be provided or both be omitted"))
+    if (dual_reduced_solution === nothing) != (costs_reduced_solution === nothing)
+        throw(ArgumentError("PaPILO recovers the dual solution and the reduced costs together, `dual_reduced_solution` and `costs_reduced_solution` must either both be provided or both be omitted"))
     end
-    if original_dual_sol !== nothing && reduced_dual_sol === nothing
-        throw(ArgumentError("`original_dual_sol` was requested but the dual solution of the reduced problem `reduced_dual_sol` is missing"))
+    if dualsolution !== nothing && dual_reduced_solution === nothing
+        throw(ArgumentError("`dualsolution` was requested but the dual solution of the reduced problem `dual_reduced_solution` is missing"))
     end
-    if original_costs_sol !== nothing && reduced_costs_sol === nothing
-        throw(ArgumentError("`original_costs_sol` was requested but the reduced costs of the reduced problem `reduced_costs_sol` are missing"))
+    if reducedcosts !== nothing && costs_reduced_solution === nothing
+        throw(ArgumentError("`reducedcosts` was requested but the reduced costs of the reduced problem `costs_reduced_solution` are missing"))
     end
     args = String[]
-    for (flag, file) in (("--dual-reduced-solution", reduced_dual_sol), ("--costs-reduced-solution", reduced_costs_sol))
+    for (flag, file) in (("--dual-reduced-solution", dual_reduced_solution), ("--costs-reduced-solution", costs_reduced_solution))
         if file !== nothing
             @assert isfile(file)
             push!(args, flag, string(file))
         end
     end
-    for (flag, file) in (("--dualsolution", original_dual_sol), ("-c", original_costs_sol))
+    for (flag, file) in (("--dualsolution", dualsolution), ("--reducedcosts", reducedcosts))
         if file !== nothing
             # so that the check below cannot be fooled by a leftover file
             rm(file, force=true)
@@ -124,7 +125,7 @@ function postsolve_from_file(problem_postsolve, reduced_sol, original_sol; reduc
     end
     # PaPILO exits successfully but writes no dual file when the archive does not contain
     # dual information, so the files themselves are what tells us whether it worked
-    for file in (original_dual_sol, original_costs_sol)
+    for file in (dualsolution, reducedcosts)
         if file !== nothing && !isfile(file)
             error("PaPILO did not write $file because $problem_postsolve does not contain dual information, rerun `presolve_write_from_file` with `dual_postsolve=true`")
         end

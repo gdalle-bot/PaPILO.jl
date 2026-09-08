@@ -60,14 +60,16 @@ PaPILO.postsolve_from_file(
     postsolve_file,
     reduced_sol,
     original_sol;
-    reduced_dual_sol = reduced_dual, # dual solution of the reduced problem
-    reduced_costs_sol = reduced_costs, # reduced costs of the reduced problem
-    original_dual_sol = original_dual, # where to write the original dual solution
-    original_costs_sol = original_costs, # where to write the original reduced costs
+    dual_reduced_solution = reduced_dual, # dual solution of the reduced problem
+    costs_reduced_solution = reduced_costs, # reduced costs of the reduced problem
+    dualsolution = original_dual, # where to write the original dual solution
+    reducedcosts = original_costs, # where to write the original reduced costs
 )
 ```
 
-PaPILO recovers duals and reduced costs together, so `reduced_dual_sol` and
-`reduced_costs_sol` must both be given. Conversely, an archive written with
+The keyword arguments are named after the PaPILO command line flags they map to
+(`--dual-reduced-solution`, `--costs-reduced-solution`, `--dualsolution`,
+`--reducedcosts`). PaPILO recovers duals and reduced costs together, so
+`dual_reduced_solution` and `costs_reduced_solution` must both be given. Conversely, an archive written with
 `dual_postsolve = true` must be postsolved with them; the default archive is primal-only
 and unchanged.

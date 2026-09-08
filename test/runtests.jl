@@ -235,10 +235,10 @@ end
         postsolve_file,
         reduced_sol,
         original_sol;
-        reduced_dual_sol=reduced_dual,
-        reduced_costs_sol=reduced_costs,
-        original_dual_sol=original_dual,
-        original_costs_sol=original_costs,
+        dual_reduced_solution=reduced_dual,
+        costs_reduced_solution=reduced_costs,
+        dualsolution=original_dual,
+        reducedcosts=original_costs,
     )
     @test isfile(original_sol)
     @test isfile(original_dual)
@@ -316,17 +316,17 @@ end
     @testset "argument validation" begin
         # duals and reduced costs must be requested together
         @test_throws ArgumentError PaPILO.postsolve_from_file(
-            postsolve_file, reduced_sol, original_sol; reduced_dual_sol=reduced_dual,
+            postsolve_file, reduced_sol, original_sol; dual_reduced_solution=reduced_dual,
         )
         @test_throws ArgumentError PaPILO.postsolve_from_file(
-            postsolve_file, reduced_sol, original_sol; reduced_costs_sol=reduced_costs,
+            postsolve_file, reduced_sol, original_sol; costs_reduced_solution=reduced_costs,
         )
         # an output without the matching reduced-space input
         @test_throws ArgumentError PaPILO.postsolve_from_file(
-            postsolve_file, reduced_sol, original_sol; original_dual_sol=original_dual,
+            postsolve_file, reduced_sol, original_sol; dualsolution=original_dual,
         )
         @test_throws ArgumentError PaPILO.postsolve_from_file(
-            postsolve_file, reduced_sol, original_sol; original_costs_sol=original_costs,
+            postsolve_file, reduced_sol, original_sol; reducedcosts=original_costs,
         )
     end
 
@@ -364,10 +364,10 @@ end
             primal_postsolve_file,
             primal_reduced_sol,
             primal_only;
-            reduced_dual_sol=reduced_dual,
-            reduced_costs_sol=reduced_costs,
-            original_dual_sol=missing_dual,
-            original_costs_sol=missing_costs,
+            dual_reduced_solution=reduced_dual,
+            costs_reduced_solution=reduced_costs,
+            dualsolution=missing_dual,
+            reducedcosts=missing_costs,
         )
         @test !isfile(missing_dual)
         @test !isfile(missing_costs)
@@ -381,10 +381,10 @@ end
             primal_postsolve_file,
             primal_reduced_sol,
             primal_only;
-            reduced_dual_sol=reduced_dual,
-            reduced_costs_sol=reduced_costs,
-            original_dual_sol=stale_dual,
-            original_costs_sol=stale_costs,
+            dual_reduced_solution=reduced_dual,
+            costs_reduced_solution=reduced_costs,
+            dualsolution=stale_dual,
+            reducedcosts=stale_costs,
         )
     end
 end
