@@ -126,12 +126,17 @@ ENDATA
     PaPILO.postsolve_from_file(postsolve_file, reduced_sol, original_sol)
     @test isfile(original_sol)
 
-    # `read_sol` handles genuine SCIP output, not just PaPILO's own format
+    # `read_sol` handles genuine SCIP output, not just PaPILO's own format. Assert the
+    # header is really there first, otherwise skipping it would be tested vacuously.
+    scip_lines = filter(!isempty, strip.(readlines(reduced_sol)))
+    @test any(startswith(line, "objective value:") for line in scip_lines)
     scip_values = PaPILO.read_sol(reduced_sol)
     @test !isempty(scip_values)
     @test all(isfinite, values(scip_values))
     @test !any(startswith(name, "objective") for name in keys(scip_values))
     @test !haskey(scip_values, "=obj=")
+    # exactly the non-header lines became entries
+    @test length(scip_values) == count(!startswith("objective value:"), scip_lines)
 end
 
 # A pure LP used to exercise dual postsolve. Dual postsolve is only available for
@@ -428,6 +433,14 @@ end
         X2                                                 -0.5  (obj:2)
         """)
         @test PaPILO.read_sol(file) == Dict("X1" => 3.6, "X2" => -0.5)
+        # SCIP separates the trailing `(obj:...)` with a tab
+        tabbed = tempname() * ".sol"
+        write(tabbed, "objective value:   10\nX1    3.6 \t(obj:1)\nX2    -0.5 \t(obj:2)\n")
+        @test PaPILO.read_sol(tabbed) == Dict("X1" => 3.6, "X2" => -0.5)
+        # the header is skipped however it is spaced, including with no space at all
+        tight = tempname() * ".sol"
+        write(tight, "objective value:10\nX1  3.6\n")
+        @test PaPILO.read_sol(tight) == Dict("X1" => 3.6)
     end
 
     @testset "malformed lines are skipped" begin

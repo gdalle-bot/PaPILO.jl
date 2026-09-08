@@ -60,12 +60,15 @@ function read_sol(solution_file)
     values = Dict{String,Float64}()
     for line in eachline(solution_file)
         tokens = split(line)
-        # a line needs a name and a value, and `=obj=` is a header, not an entry
+        # an entry is a name followed by a number, anything else is a header. That rule
+        # already skips the headers SCIP writes, because their second token is not a
+        # number: `objective value:  10` splits into `objective`, `value:`, `10`, and
+        # `solution status: optimal` into `solution`, `status:`, `optimal`. Only `=obj=`
+        # needs to be named explicitly, since its second token is the objective value.
         if length(tokens) < 2 || tokens[1] == "=obj="
             continue
         end
         value = tryparse(Float64, tokens[2])
-        # skips headers such as `objective value:` or `solution status:`
         if value !== nothing
             values[tokens[1]] = value
         end
